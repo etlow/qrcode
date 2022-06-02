@@ -12,7 +12,7 @@ function threshold(canv, ct) {
     const data = imageData.data;
     for (let i = 0; i < data.length; i += 4) { // For each pixel
         let val = LIGHT_VAL;
-        if (data[i] < 80 && data[i + 1] < 80 && data[i + 2] < 80) {
+        if (data[i] < 120 && data[i + 1] < 120 && data[i + 2] < 120) {
             val = DARK_VAL; // Threshold
         }
         data[i] = val; // Write to rgb values of imageData
@@ -136,13 +136,16 @@ function getRange(canv, ctx, size) {
     const yLast = getFirstCoord(canv, ctx, size, false, true);
     return {xFirst, yFirst, xLast, yLast};
 }
+function drawCircle(ctx, x, y, color = 'green') {
+    ctx.strokeStyle = color;
+    ctx.beginPath();
+    ctx.arc(x, y, 5, 0, Math.PI * 2);
+    ctx.stroke();
+}
 // Draw lines on canvas to visualise detected positions
 function drawLines(canv, ctx, size, range) {
     const {xFirst, yFirst, xLast, yLast} = range;
     ctx.strokeStyle = 'green';
-    ctx.beginPath(); // Circle in first module
-    ctx.arc(xFirst, yFirst, 5, 0, Math.PI * 2);
-    ctx.stroke();
     const width = (size.darkWidth + size.lightWidth) / 2;
     // Horizontal lines
     const yLimit = yLast + width / 2;
@@ -199,12 +202,91 @@ function getCode(canv, ct, size, range) {
             const xStart = Math.round(xFirst + (x - 0.5) * width);
             const xEnd = xStart + Math.round(width);
             const count = countPixels(canv, data, xStart, yStart, xEnd, yEnd);
-            const maxVal = argmax(count); // simple argmax for now
+            const maxVal = argmax(count);
             row.push(maxVal == DARK_VAL ? 1 : 0); // Determine if light or dark
         }
         code.push(row);
     }
     return code;
+}
+// Takes in coordinates and returns coordinates of best fit
+function bestFitModule(canv, data, size, oldX, oldY) {
+    const width = (size.darkWidth + size.lightWidth) / 2;
+    const r = Math.round(width / 2);
+    const countAround = (x, y) => countPixels(canv, data, x - r, y - r, x + r, y + r);
+    const thresholdToMove = width / 4; // Don't want to move just because a side has one more pixel than the other
+    const moveLimit = Math.round(width / 2); // Prevent moving too much
+    let x = Math.round(oldX);
+    let y = Math.round(oldY);
+    const val = argmax(countAround(x, y));
+    let xMove = 0, yMove = 0, prevX, prevY;
+    do { // Move horizontally
+        prevX = x;
+        xMove++;
+        // A[xxxxxS] Try to move left
+        const leftAdd = countPixels(canv, data, x - r - 1, y - r, x - r, y + r)[val] ?? 0;
+        const leftSub = countPixels(canv, data, x + r - 1, y - r, x + r, y + r)[val] ?? 0;
+        if (leftAdd > leftSub + thresholdToMove) {
+            x--;
+        }
+        // [Sxxxxx]A Note x coord for lA + 1 = rS, lS + 1 = rA, no infinite loop
+        const rightAdd = countPixels(canv, data, x + r, y - r, x + r + 1, y + r)[val] ?? 0;
+        const rightSub = countPixels(canv, data, x - r, y - r, x - r + 1, y + r)[val] ?? 0;
+        if (rightAdd > rightSub + thresholdToMove) {
+            x++;
+        }
+    } while (prevX != x && xMove <= moveLimit);
+    do { // Move vertically
+        prevY = y;
+        yMove++;
+        const upAdd = countPixels(canv, data, x - r, y - r - 1, x + r, y - r)[val] ?? 0;
+        const upSub = countPixels(canv, data, x - r, y + r - 1, x + r, y + r)[val] ?? 0;
+        if (upAdd > upSub + thresholdToMove) {
+            y--;
+        }
+        const downAdd = countPixels(canv, data, x - r, y + r, x + r, y + r + 1)[val] ?? 0;
+        const downSub = countPixels(canv, data, x - r, y - r, x + r, y - r + 1)[val] ?? 0;
+        if (downAdd > downSub + thresholdToMove) {
+            y++;
+        }
+    } while (prevY != y && yMove <= moveLimit);
+    if (xMove > moveLimit || yMove > moveLimit) { // Move limit was reached
+        return {x: oldX, y: oldY, bad: true}; // Assume bad alignment
+    }
+    return {x, y};
+}
+// Get best fit module positions
+function getPositions(canv, ctx, size) {
+    const width = (size.darkWidth + size.lightWidth) / 2;
+    const xFirst = getFirstCoord(canv, ctx, size, true, false);
+    const yFirst = getFirstCoord(canv, ctx, size, false, false);
+    const data = ctx.getImageData(0, 0, canv.width, canv.height).data;
+    const arr = [];
+    let y = yFirst;
+    do { // Each row
+        let x = xFirst, firstColY;
+        const row = [];
+        do { // Each column (single module)
+            const pos = bestFitModule(canv, data, size, x, y);
+            row.push(pos);
+            ({x, y} = pos);
+            x += width;
+            firstColY ??= y; // undefined means this is first column
+        } while (x + width < canv.width);
+        arr.push(row);
+        y = firstColY + width; // Module closest to first column of next row is first column of this row
+    } while (y + width < canv.height);
+    return arr;
+}
+// Takes in 2D array of positions, looks in canvas and returns 2D barcode
+function getCodeFit(canv, ctx, size, arr) {
+    const width = (size.darkWidth + size.lightWidth) / 2;
+    const data = ctx.getImageData(0, 0, canv.width, canv.height).data;
+    const r = Math.round(width / 2);
+    return arr.map(row => row.map(pos => // For each module
+        argmax(countPixels(canv, data, pos.x - r, pos.y - r, pos.x + r, pos.y + r)) == DARK_VAL // Determine if light or dark
+        ? 1 : 0
+    ));
 }
 // Draw code to new canvas
 function drawCode(canv, code) {
@@ -236,9 +318,15 @@ function main() {
     const size = getModuleSize(canvas, ctx);
     const range = getRange(canvas, ctx, size);
     const code = getCode(canvas, ctx, size, range);
+    const positions = getPositions(canvas, ctx, size);
+    const codeFit = getCodeFit(canvas, ctx, size, positions);
+    positions.flat().forEach(pos => drawCircle(ctx, pos.x, pos.y));
+    positions.flat().filter(pos => pos.bad).forEach(pos => drawCircle(ctx, pos.x, pos.y, 'red'));
     drawLines(canvas, ctx, size, range); // drawing before getCode may affect result
     const result = document.getElementById('result');
     drawCode(result, code);
+    const resultFit = document.getElementById('fit');
+    drawCode(fit, codeFit);
 }
 if (img.complete) {
     main()
