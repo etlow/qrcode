@@ -25,30 +25,49 @@ function count(arr) {
     arr.forEach(e => (count[e] = (count[e] ?? 0) + 1));
     return count;
 }
-// Returns frequency count of widths from canvas data
-function getCrossoverWidths(imageData) {
-    const data = imageData.data;
-    const lightWidths = [];
-    const darkWidths = [];
+// Helper function for getCrossoverLengths
+// Returns array of dark and light widths
+function getWidths(getVal, iStart, jStart, iEnd, jEnd) {
+    let light = [];
+    let dark = [];
     // Currently only horizontal scanlines, can add vertical (heights?)
-    for (let y = 0; y < imageData.height; y++) { // For each row
-        let prev = data[getIndex(imageData, 0, y)];
+    for (let j = jStart; j < jEnd; j++) { // For each row
+        let prev;
         let pos = 0;
-        for (let x = 1; x < imageData.width; x++) { // Each pixel
-            const curr = data[getIndex(imageData, x, y)];
-            if (prev == LIGHT_VAL && curr != LIGHT_VAL) { // If color switched
-                lightWidths.push(x - pos); // Push distance from last transition
-                pos = x; // Save transition position
+        for (let i = iStart + 1; i < iEnd; i++) { // Each pixel
+            const curr = getVal(i, j);
+            if (pos == 0) {
+                // Distance from start to first transition is probably not part of a module, so ignore
+                pos = i; // Save transition position
+            } else if (prev == LIGHT_VAL && curr != LIGHT_VAL) { // If color switched
+                light.push(i - pos); // Push distance from last transition
+                pos = i; // Save transition position
             } else if (prev == DARK_VAL && curr != DARK_VAL) {
-                darkWidths.push(x - pos);
-                pos = x;
+                dark.push(i - pos);
+                pos = i;
             }
             prev = curr; // Set new color
         }
     }
-    const lightCounts = count(lightWidths);
-    const darkCounts = count(darkWidths);
-    return {lightCounts, darkCounts};
+    return {light, dark};
+}
+// Returns frequency count of widths and heights from canvas data
+function getCrossoverLengths(imageData, xStart, yStart, xEnd, yEnd) {
+    if (xStart == undefined) {
+        xStart = 0;
+        yStart = 0;
+        xEnd = imageData.width;
+        yEnd = imageData.height;
+    }
+    const data = imageData.data;
+    const widths = getWidths((i, j) => data[getIndex(imageData, i, j)], xStart, yStart, xEnd, yEnd);
+    const heights = getWidths((i, j) => data[getIndex(imageData, j, i)], yStart, xStart, yEnd, xEnd);
+    return {
+        lightWidths: count(widths.light),
+        darkWidths: count(widths.dark),
+        lightHeights: count(heights.light),
+        darkHeights: count(heights.dark)
+    };
 }
 function argmax(obj) {
     let maxI;
@@ -77,12 +96,14 @@ function averagePeak(obj) {
 }
 // Returns average width of modules from canvas
 function getModuleSize(imageData) {
-    const widths = getCrossoverWidths(imageData);
-    console.log(widths);
-    const {lightCounts, darkCounts} = widths;
-    const lightWidth = averagePeak(lightCounts);
-    const darkWidth = averagePeak(darkCounts);
-    return {lightWidth, darkWidth};
+    const lengths = getCrossoverLengths(imageData);
+    console.log(lengths);
+    return {
+        lightWidth: averagePeak(lengths.lightWidths),
+        darkWidth: averagePeak(lengths.darkWidths),
+        lightHeight: averagePeak(lengths.lightHeights),
+        darkHeight: averagePeak(lengths.darkHeights)
+    };
 }
 // Finds first row/column of modules
 // size: module size
@@ -90,7 +111,8 @@ function getModuleSize(imageData) {
 // isReversed: True if finding last coordinate instead of first
 function getFirstCoord(imageData, size, isX, isReversed) {
     const data = imageData.data;
-    const thresh = size.darkWidth / 2;
+    const radius = isX ? size.darkWidth / 2 : size.darkHeight / 2;
+    const thresh = radius;
     const i_max = isX ? imageData.width : imageData.height;
     const j_max = isX ? imageData.height : imageData.width;
     let getVal_1 = (x, y) => data[getIndex(imageData, x, y)]; // Default canvas access
@@ -111,7 +133,7 @@ function getFirstCoord(imageData, size, isX, isReversed) {
             if (curr == DARK_VAL) {
                 count++;
                 if (count > thresh) { // Enough dark pixels
-                    const coord = i + size.darkWidth / 2;
+                    const coord = i + radius;
                     if (isReversed) {
                         return i_max - coord - 1;
                         // staircase indentation
@@ -141,16 +163,17 @@ function drawLines(canv, ctx, size, range) {
     const {xFirst, yFirst, xLast, yLast} = range;
     ctx.strokeStyle = 'green';
     const width = (size.darkWidth + size.lightWidth) / 2;
+    const height = (size.darkHeight + size.lightHeight) / 2;
     // Horizontal lines
-    const yLimit = yLast + width / 2;
+    const yLimit = yLast + height / 2;
     ctx.beginPath(); // Line showing last pixel location
     ctx.moveTo(0, yLimit);
     ctx.lineTo(canv.width, yLimit);
     ctx.stroke();
-    for (let i = 0; yFirst + i * width < yLimit; i++) {
+    for (let i = 0; yFirst + i * height < yLimit; i++) {
         ctx.beginPath();
-        ctx.moveTo(0, yFirst + i * width);
-        ctx.lineTo(canv.width, yFirst + i * width);
+        ctx.moveTo(0, yFirst + i * height);
+        ctx.lineTo(canv.width, yFirst + i * height);
         ctx.stroke();
     }
     // Vertical lines
@@ -183,12 +206,13 @@ function getCode(imageData, size, range) {
     const {xFirst, yFirst, xLast, yLast} = range;
     // Calculate positions
     const width = (size.darkWidth + size.lightWidth) / 2;
+    const height = (size.darkHeight + size.lightHeight) / 2;
     const xSize = Math.round((xLast - xFirst) / width + 1);
-    const ySize = Math.round((yLast - yFirst) / width + 1);
+    const ySize = Math.round((yLast - yFirst) / height + 1);
     const code = [];
     for (let y = 0; y < ySize; y++) {
-        const yStart = Math.round(yFirst + (y - 0.5) * width);
-        const yEnd = yStart + Math.round(width);
+        const yStart = Math.round(yFirst + (y - 0.5) * height);
+        const yEnd = yStart + Math.round(height);
         const row = [];
         for (let x = 0; x < xSize; x++) { // For each position
             const xStart = Math.round(xFirst + (x - 0.5) * width);
@@ -209,14 +233,16 @@ function bestFitModule(imageData, size, oldX, oldY, expectedValue) {
 
     // r related to pixel count (similar to radius)
     // Divide by 2 for radius + a bit more, centre portion is more likely to be the module color
-    let r = Math.floor(Math.min(size.darkWidth, size.lightWidth) / 3); 
+    const r = Math.floor(Math.min(size.darkWidth, size.lightWidth) / 3); 
     const val = expectedValue ?? argmax(countPixels(imageData, x - r, y - r, x + r, y + r));
-    r = Math.round((val == DARK_VAL ? size.darkWidth : size.lightWidth) / 2);
-    //r = Math.round((size.darkWidth + size.lightWidth) / 2);
-    const thresholdToMove = r; // Don't want to move just because a side has one more pixel than the other
+    // radius width/height
+    const w = Math.round((val == DARK_VAL ? size.darkWidth : size.lightWidth) / 2);
+    const h = Math.round((val == DARK_VAL ? size.darkHeight : size.lightHeight) / 2);
+    const thresholdToMoveX = w; // Don't want to move just because a side has one more pixel than the other
+    const thresholdToMoveY = h;
 
     // averageWidth related to move limit
-    const averageWidth = Math.round((size.darkWidth + size.lightWidth) / 2);
+    const averageWidth = Math.round((size.darkWidth + size.lightWidth + size.darkHeight + size.lightHeight) / 4);
     const moveLimit = Math.round(averageWidth / (expectedValue == null ? 2 : 1)); // Prevent moving too much
 
     let xMove = 0, yMove = 0; // Move counter
@@ -225,29 +251,29 @@ function bestFitModule(imageData, size, oldX, oldY, expectedValue) {
         prevX = x;
         xMove++;
         // A[xxxxxS] Try to move left
-        const leftAdd = countPixels(imageData, x - r - 1, y - r, x - r, y + r)[val] ?? 0;
-        const leftSub = countPixels(imageData, x + r - 1, y - r, x + r, y + r)[val] ?? 0;
-        if (leftAdd > leftSub + thresholdToMove) {
+        const leftAdd = countPixels(imageData, x - w - 1, y - h, x - w, y + h)[val] ?? 0;
+        const leftSub = countPixels(imageData, x + w - 1, y - h, x + w, y + h)[val] ?? 0;
+        if (leftAdd > leftSub + thresholdToMoveX) {
             x--;
         }
         // [Sxxxxx]A Note x coord for lA + 1 = rS, lS + 1 = rA, no infinite loop
-        const rightAdd = countPixels(imageData, x + r, y - r, x + r + 1, y + r)[val] ?? 0;
-        const rightSub = countPixels(imageData, x - r, y - r, x - r + 1, y + r)[val] ?? 0;
-        if (rightAdd > rightSub + thresholdToMove) {
+        const rightAdd = countPixels(imageData, x + w, y - h, x + w + 1, y + h)[val] ?? 0;
+        const rightSub = countPixels(imageData, x - w, y - h, x - w + 1, y + h)[val] ?? 0;
+        if (rightAdd > rightSub + thresholdToMoveX) {
             x++;
         }
     } while (prevX != x && xMove <= moveLimit);
     do { // Move vertically
         prevY = y;
         yMove++;
-        const upAdd = countPixels(imageData, x - r, y - r - 1, x + r, y - r)[val] ?? 0;
-        const upSub = countPixels(imageData, x - r, y + r - 1, x + r, y + r)[val] ?? 0;
-        if (upAdd > upSub + thresholdToMove) {
+        const upAdd = countPixels(imageData, x - w, y - h - 1, x + w, y - h)[val] ?? 0;
+        const upSub = countPixels(imageData, x - w, y + h - 1, x + w, y + h)[val] ?? 0;
+        if (upAdd > upSub + thresholdToMoveY) {
             y--;
         }
-        const downAdd = countPixels(imageData, x - r, y + r, x + r, y + r + 1)[val] ?? 0;
-        const downSub = countPixels(imageData, x - r, y - r, x + r, y - r + 1)[val] ?? 0;
-        if (downAdd > downSub + thresholdToMove) {
+        const downAdd = countPixels(imageData, x - w, y + h, x + w, y + h + 1)[val] ?? 0;
+        const downSub = countPixels(imageData, x - w, y - h, x + w, y - h + 1)[val] ?? 0;
+        if (downAdd > downSub + thresholdToMoveY) {
             y++;
         }
     } while (prevY != y && yMove <= moveLimit);
@@ -259,6 +285,7 @@ function bestFitModule(imageData, size, oldX, oldY, expectedValue) {
 // Get best fit module positions
 function getPositions(imageData, size) {
     const width = (size.darkWidth + size.lightWidth) / 2;
+    const height = (size.darkHeight + size.lightHeight) / 2;
     const xFirst = getFirstCoord(imageData, size, true, false);
     const yFirst = getFirstCoord(imageData, size, false, false);
     const arr = [];
@@ -274,10 +301,10 @@ function getPositions(imageData, size) {
                 expectedValue = DARK_VAL;
             } else if (row.length == 0 && arr.length > 0) { // First column and not first row
                 x = topModule.x;
-                y = topModule.y + width;
+                y = topModule.y + height;
             } else if (topModule?.bad == false) { // Not first column, top module exists and is not bad
                 x = (x + width + topModule.x) / 2;
-                y = (y + topModule.y + width) / 2;
+                y = (y + topModule.y + height) / 2;
             } else if (row.length > 0) { // Not first column, top module unavailable
                 x += width;
             }
@@ -286,15 +313,16 @@ function getPositions(imageData, size) {
             ({x, y} = pos);
         } while (x + width < imageData.width);
         arr.push(row);
-    } while (y + width < imageData.height);
+    } while (y + height < imageData.height);
     return arr;
 }
 // Takes in 2D array of positions, looks in canvas and returns 2D barcode
 function getCodeFit(imageData, size, arr) {
-    const width = (size.darkWidth + size.lightWidth) / 2;
-    const r = Math.round(width / 2);
+    // radius width/height
+    const w = Math.round((size.darkWidth + size.lightWidth) / 2 / 2);
+    const h = Math.round((size.darkHeight + size.lightHeight) / 2 / 2);
     return arr.map(row => row.map(pos => // For each module
-        argmax(countPixels(imageData, pos.x - r, pos.y - r, pos.x + r, pos.y + r)) == DARK_VAL // Determine if light or dark
+        argmax(countPixels(imageData, pos.x - w, pos.y - h, pos.x + w, pos.y + h)) == DARK_VAL // Determine if light or dark
         ? 1 : 0
     ));
 }
