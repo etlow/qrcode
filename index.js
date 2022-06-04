@@ -3,13 +3,11 @@ const LIGHT_VAL = 255;
 const DARK_VAL = 0;
 // Helper function to get the index to access the canvas
 // There are 4 values red green blue alpha, this index points to the first
-function getIndex(canv, x, y) {
-    return (y * canv.width + x) * 4;
+function getIndex(imageData, x, y) {
+    return (y * imageData.width + x) * 4;
 }
 // Threshold and put to canvas
-function threshold(canv, ct) {
-    const imageData = ct.getImageData(0, 0, canv.width, canv.height);
-    const data = imageData.data;
+function threshold(data) {
     for (let i = 0; i < data.length; i += 4) { // For each pixel
         let val = LIGHT_VAL;
         if (data[i] < 120 && data[i + 1] < 120 && data[i + 2] < 120) {
@@ -19,7 +17,6 @@ function threshold(canv, ct) {
         data[i + 1] = val;
         data[i + 2] = val;
     }
-    ct.putImageData(imageData, 0, 0);
 }
 // Returns frequency count of each element in arr
 // Input: [1, 1, 1, 2, 4] Output: {1: 3, 2: 1, 4: 1} 
@@ -29,15 +26,16 @@ function count(arr) {
     return count;
 }
 // Returns frequency count of widths from canvas data
-function getCrossoverWidths(canv, data) {
+function getCrossoverWidths(imageData) {
+    const data = imageData.data;
     const lightWidths = [];
     const darkWidths = [];
     // Currently only horizontal scanlines, can add vertical (heights?)
-    for (let y = 0; y < canv.height; y++) { // For each row
-        let prev = data[getIndex(canv, 0, y)];
+    for (let y = 0; y < imageData.height; y++) { // For each row
+        let prev = data[getIndex(imageData, 0, y)];
         let pos = 0;
-        for (let x = 1; x < canv.width; x++) { // Each pixel
-            const curr = data[getIndex(canv, x, y)];
+        for (let x = 1; x < imageData.width; x++) { // Each pixel
+            const curr = data[getIndex(imageData, x, y)];
             if (prev == LIGHT_VAL && curr != LIGHT_VAL) { // If color switched
                 lightWidths.push(x - pos); // Push distance from last transition
                 pos = x; // Save transition position
@@ -78,42 +76,38 @@ function averagePeak(obj) {
     return total / count;
 }
 // Returns average width of modules from canvas
-function getModuleSize(canv, ct) {
-    const imageData = ct.getImageData(0, 0, canv.width, canv.height);
-    const data = imageData.data;
-    const widths = getCrossoverWidths(canv, data);
+function getModuleSize(imageData) {
+    const widths = getCrossoverWidths(imageData);
     console.log(widths);
     const {lightCounts, darkCounts} = widths;
     const lightWidth = averagePeak(lightCounts);
     const darkWidth = averagePeak(darkCounts);
-    ct.putImageData(imageData, 0, 0);
     return {lightWidth, darkWidth};
 }
 // Finds first row/column of modules
 // size: module size
 // isX: True if finding first x coordinate, otherwise y
 // isReversed: True if finding last coordinate instead of first
-function getFirstCoord(canv, ct, size, isX, isReversed) {
-    const imageData = ct.getImageData(0, 0, canv.width, canv.height);
+function getFirstCoord(imageData, size, isX, isReversed) {
     const data = imageData.data;
     const thresh = size.darkWidth / 2;
-    const i_max = isX ? canv.width : canv.height;
-    const j_max = isX ? canv.height : canv.width;
-    let getI_1 = getIndex; // Default canvas access
+    const i_max = isX ? imageData.width : imageData.height;
+    const j_max = isX ? imageData.height : imageData.width;
+    let getVal_1 = (x, y) => data[getIndex(imageData, x, y)]; // Default canvas access
     if (isReversed) {
         // Flip both x and y to search from the back
-        getI_1 = (c, x, y) => getIndex(c, c.width - x - 1, c.height - y - 1);
+        getVal_1 = (x, y) => data[getIndex(imageData, imageData.width - x - 1, imageData.height - y - 1)];
     }
-    let getI = getI_1; // Could probably use closures to be able to reference getI_1 but this works
+    let getVal = getVal_1; // Could probably use closures to be able to reference getVal_1 later but this works
     if (isX) {
         // Code below is interested in second coordinate
         // If x coordinate is needed, need to swap them around
-        getI = (c, j, i) => getI_1(c, i, j);
+        getVal = (j, i) => getVal_1(i, j);
     }
     for (let i = 0; i < i_max; i++) { // Loop through each coordinate of interest
         let count = 0;
         for (let j = 0; j < j_max; j++) { // Find first row/col with enough dark pixels
-            const curr = data[getI(canv, j, i)];
+            const curr = getVal(j, i);
             if (curr == DARK_VAL) {
                 count++;
                 if (count > thresh) { // Enough dark pixels
@@ -129,11 +123,11 @@ function getFirstCoord(canv, ct, size, isX, isReversed) {
     }
 }
 // Finds first and last rows and columns
-function getRange(canv, ctx, size) {
-    const xFirst = getFirstCoord(canv, ctx, size, true, false);
-    const yFirst = getFirstCoord(canv, ctx, size, false, false);
-    const xLast = getFirstCoord(canv, ctx, size, true, true);
-    const yLast = getFirstCoord(canv, ctx, size, false, true);
+function getRange(imageData, size) {
+    const xFirst = getFirstCoord(imageData, size, true, false);
+    const yFirst = getFirstCoord(imageData, size, false, false);
+    const xLast = getFirstCoord(imageData, size, true, true);
+    const yLast = getFirstCoord(imageData, size, false, true);
     return {xFirst, yFirst, xLast, yLast};
 }
 function drawCircle(ctx, x, y, color = 'green') {
@@ -173,11 +167,11 @@ function drawLines(canv, ctx, size, range) {
     }
 }
 // Counts pixel values in range
-function countPixels(canv, data, xStart, yStart, xEnd, yEnd) {
+function countPixels(imageData, xStart, yStart, xEnd, yEnd) {
     const obj = {};
     for (let x = xStart; x < xEnd; x++) { // For each pixel in range
         for (let y = yStart; y < yEnd; y++) {
-            const val = data[getIndex(canv, x, y)];
+            const val = imageData.data[getIndex(imageData, x, y)];
             obj[val] = (obj[val] ?? 0) + 1; // Increment count for pixel value
         }
     }
@@ -185,9 +179,7 @@ function countPixels(canv, data, xStart, yStart, xEnd, yEnd) {
 }
 // Extract code from image
 // Returns 2d array
-function getCode(canv, ct, size, range) {
-    const imageData = ct.getImageData(0, 0, canv.width, canv.height);
-    const data = imageData.data;
+function getCode(imageData, size, range) {
     const {xFirst, yFirst, xLast, yLast} = range;
     // Calculate positions
     const width = (size.darkWidth + size.lightWidth) / 2;
@@ -201,7 +193,7 @@ function getCode(canv, ct, size, range) {
         for (let x = 0; x < xSize; x++) { // For each position
             const xStart = Math.round(xFirst + (x - 0.5) * width);
             const xEnd = xStart + Math.round(width);
-            const count = countPixels(canv, data, xStart, yStart, xEnd, yEnd);
+            const count = countPixels(imageData, xStart, yStart, xEnd, yEnd);
             const maxVal = argmax(count);
             row.push(maxVal == DARK_VAL ? 1 : 0); // Determine if light or dark
         }
@@ -211,14 +203,14 @@ function getCode(canv, ct, size, range) {
 }
 // Takes in coordinates and returns coordinates of best fit
 // expectedValue: forces finding a dark or light module
-function bestFitModule(canv, data, size, oldX, oldY, expectedValue) {
+function bestFitModule(imageData, size, oldX, oldY, expectedValue) {
     let x = Math.round(oldX);
     let y = Math.round(oldY);
 
     // r related to pixel count (similar to radius)
     // Divide by 2 for radius + a bit more, centre portion is more likely to be the module color
     let r = Math.floor(Math.min(size.darkWidth, size.lightWidth) / 3); 
-    const val = expectedValue ?? argmax(countPixels(canv, data, x - r, y - r, x + r, y + r));
+    const val = expectedValue ?? argmax(countPixels(imageData, x - r, y - r, x + r, y + r));
     r = Math.round((val == DARK_VAL ? size.darkWidth : size.lightWidth) / 2);
     //r = Math.round((size.darkWidth + size.lightWidth) / 2);
     const thresholdToMove = r; // Don't want to move just because a side has one more pixel than the other
@@ -233,14 +225,14 @@ function bestFitModule(canv, data, size, oldX, oldY, expectedValue) {
         prevX = x;
         xMove++;
         // A[xxxxxS] Try to move left
-        const leftAdd = countPixels(canv, data, x - r - 1, y - r, x - r, y + r)[val] ?? 0;
-        const leftSub = countPixels(canv, data, x + r - 1, y - r, x + r, y + r)[val] ?? 0;
+        const leftAdd = countPixels(imageData, x - r - 1, y - r, x - r, y + r)[val] ?? 0;
+        const leftSub = countPixels(imageData, x + r - 1, y - r, x + r, y + r)[val] ?? 0;
         if (leftAdd > leftSub + thresholdToMove) {
             x--;
         }
         // [Sxxxxx]A Note x coord for lA + 1 = rS, lS + 1 = rA, no infinite loop
-        const rightAdd = countPixels(canv, data, x + r, y - r, x + r + 1, y + r)[val] ?? 0;
-        const rightSub = countPixels(canv, data, x - r, y - r, x - r + 1, y + r)[val] ?? 0;
+        const rightAdd = countPixels(imageData, x + r, y - r, x + r + 1, y + r)[val] ?? 0;
+        const rightSub = countPixels(imageData, x - r, y - r, x - r + 1, y + r)[val] ?? 0;
         if (rightAdd > rightSub + thresholdToMove) {
             x++;
         }
@@ -248,13 +240,13 @@ function bestFitModule(canv, data, size, oldX, oldY, expectedValue) {
     do { // Move vertically
         prevY = y;
         yMove++;
-        const upAdd = countPixels(canv, data, x - r, y - r - 1, x + r, y - r)[val] ?? 0;
-        const upSub = countPixels(canv, data, x - r, y + r - 1, x + r, y + r)[val] ?? 0;
+        const upAdd = countPixels(imageData, x - r, y - r - 1, x + r, y - r)[val] ?? 0;
+        const upSub = countPixels(imageData, x - r, y + r - 1, x + r, y + r)[val] ?? 0;
         if (upAdd > upSub + thresholdToMove) {
             y--;
         }
-        const downAdd = countPixels(canv, data, x - r, y + r, x + r, y + r + 1)[val] ?? 0;
-        const downSub = countPixels(canv, data, x - r, y - r, x + r, y - r + 1)[val] ?? 0;
+        const downAdd = countPixels(imageData, x - r, y + r, x + r, y + r + 1)[val] ?? 0;
+        const downSub = countPixels(imageData, x - r, y - r, x + r, y - r + 1)[val] ?? 0;
         if (downAdd > downSub + thresholdToMove) {
             y++;
         }
@@ -265,11 +257,10 @@ function bestFitModule(canv, data, size, oldX, oldY, expectedValue) {
     return {x, y, bad: false};
 }
 // Get best fit module positions
-function getPositions(canv, ctx, size) {
+function getPositions(imageData, size) {
     const width = (size.darkWidth + size.lightWidth) / 2;
-    const xFirst = getFirstCoord(canv, ctx, size, true, false);
-    const yFirst = getFirstCoord(canv, ctx, size, false, false);
-    const data = ctx.getImageData(0, 0, canv.width, canv.height).data;
+    const xFirst = getFirstCoord(imageData, size, true, false);
+    const yFirst = getFirstCoord(imageData, size, false, false);
     const arr = [];
     let x, y;
     do { // Each row
@@ -290,21 +281,20 @@ function getPositions(canv, ctx, size) {
             } else if (row.length > 0) { // Not first column, top module unavailable
                 x += width;
             }
-            const pos = bestFitModule(canv, data, size, x, y, expectedValue);
+            const pos = bestFitModule(imageData, size, x, y, expectedValue);
             row.push(pos);
             ({x, y} = pos);
-        } while (x + width < canv.width);
+        } while (x + width < imageData.width);
         arr.push(row);
-    } while (y + width < canv.height);
+    } while (y + width < imageData.height);
     return arr;
 }
 // Takes in 2D array of positions, looks in canvas and returns 2D barcode
-function getCodeFit(canv, ctx, size, arr) {
+function getCodeFit(imageData, size, arr) {
     const width = (size.darkWidth + size.lightWidth) / 2;
-    const data = ctx.getImageData(0, 0, canv.width, canv.height).data;
     const r = Math.round(width / 2);
     return arr.map(row => row.map(pos => // For each module
-        argmax(countPixels(canv, data, pos.x - r, pos.y - r, pos.x + r, pos.y + r)) == DARK_VAL // Determine if light or dark
+        argmax(countPixels(imageData, pos.x - r, pos.y - r, pos.x + r, pos.y + r)) == DARK_VAL // Determine if light or dark
         ? 1 : 0
     ));
 }
@@ -333,13 +323,15 @@ function main() {
     canvas.width = parseInt(img.width);
     canvas.height = parseInt(img.height);
     ctx.drawImage(img, 0, 0);
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
     // Main code
-    threshold(canvas, ctx);
-    const size = getModuleSize(canvas, ctx);
-    const range = getRange(canvas, ctx, size);
-    const code = getCode(canvas, ctx, size, range);
-    const positions = getPositions(canvas, ctx, size);
-    const codeFit = getCodeFit(canvas, ctx, size, positions);
+    threshold(imageData.data);
+    ctx.putImageData(imageData, 0, 0);
+    const size = getModuleSize(imageData);
+    const range = getRange(imageData, size);
+    const code = getCode(imageData, size, range);
+    const positions = getPositions(imageData, size);
+    const codeFit = getCodeFit(imageData, size, positions);
     //drawLines(canvas, ctx, size, range); // drawing before getCode may affect result
     positions.flat().forEach(pos => drawCircle(ctx, pos.x, pos.y));
     positions.flat().filter(pos => pos.bad).forEach(pos => drawCircle(ctx, pos.x, pos.y, 'red'));
