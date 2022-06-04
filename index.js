@@ -210,16 +210,25 @@ function getCode(canv, ct, size, range) {
     return code;
 }
 // Takes in coordinates and returns coordinates of best fit
-function bestFitModule(canv, data, size, oldX, oldY) {
-    const width = (size.darkWidth + size.lightWidth) / 2;
-    const r = Math.round(width / 2);
-    const countAround = (x, y) => countPixels(canv, data, x - r, y - r, x + r, y + r);
-    const thresholdToMove = width / 4; // Don't want to move just because a side has one more pixel than the other
-    const moveLimit = Math.round(width / 2); // Prevent moving too much
+// expectedValue: forces finding a dark or light module
+function bestFitModule(canv, data, size, oldX, oldY, expectedValue) {
     let x = Math.round(oldX);
     let y = Math.round(oldY);
-    const val = argmax(countAround(x, y));
-    let xMove = 0, yMove = 0, prevX, prevY;
+
+    // r related to pixel count (similar to radius)
+    // Divide by 2 for radius + a bit more, centre portion is more likely to be the module color
+    let r = Math.floor(Math.min(size.darkWidth, size.lightWidth) / 3); 
+    const val = expectedValue ?? argmax(countPixels(canv, data, x - r, y - r, x + r, y + r));
+    r = Math.round((val == DARK_VAL ? size.darkWidth : size.lightWidth) / 2);
+    //r = Math.round((size.darkWidth + size.lightWidth) / 2);
+    const thresholdToMove = r; // Don't want to move just because a side has one more pixel than the other
+
+    // averageWidth related to move limit
+    const averageWidth = Math.round((size.darkWidth + size.lightWidth) / 2);
+    const moveLimit = Math.round(averageWidth / (expectedValue == null ? 2 : 1)); // Prevent moving too much
+
+    let xMove = 0, yMove = 0; // Move counter
+    let prevX, prevY; // Variable to check if actually moved
     do { // Move horizontally
         prevX = x;
         xMove++;
@@ -253,7 +262,7 @@ function bestFitModule(canv, data, size, oldX, oldY) {
     if (xMove > moveLimit || yMove > moveLimit) { // Move limit was reached
         return {x: oldX, y: oldY, bad: true}; // Assume bad alignment
     }
-    return {x, y};
+    return {x, y, bad: false};
 }
 // Get best fit module positions
 function getPositions(canv, ctx, size) {
@@ -262,19 +271,30 @@ function getPositions(canv, ctx, size) {
     const yFirst = getFirstCoord(canv, ctx, size, false, false);
     const data = ctx.getImageData(0, 0, canv.width, canv.height).data;
     const arr = [];
-    let y = yFirst;
+    let x, y;
     do { // Each row
-        let x = xFirst, firstColY;
         const row = [];
         do { // Each column (single module)
-            const pos = bestFitModule(canv, data, size, x, y);
+            let expectedValue;
+            const topModule = arr[arr.length - 1]?.[row.length];
+            if (row.length == 0 && arr.length == 0) { // First column and first row
+                x = xFirst;
+                y = yFirst;
+                expectedValue = DARK_VAL;
+            } else if (row.length == 0 && arr.length > 0) { // First column and not first row
+                x = topModule.x;
+                y = topModule.y + width;
+            } else if (topModule?.bad == false) { // Not first column, top module exists and is not bad
+                x = (x + width + topModule.x) / 2;
+                y = (y + topModule.y + width) / 2;
+            } else if (row.length > 0) { // Not first column, top module unavailable
+                x += width;
+            }
+            const pos = bestFitModule(canv, data, size, x, y, expectedValue);
             row.push(pos);
             ({x, y} = pos);
-            x += width;
-            firstColY ??= y; // undefined means this is first column
         } while (x + width < canv.width);
         arr.push(row);
-        y = firstColY + width; // Module closest to first column of next row is first column of this row
     } while (y + width < canv.height);
     return arr;
 }
@@ -320,9 +340,17 @@ function main() {
     const code = getCode(canvas, ctx, size, range);
     const positions = getPositions(canvas, ctx, size);
     const codeFit = getCodeFit(canvas, ctx, size, positions);
+    //drawLines(canvas, ctx, size, range); // drawing before getCode may affect result
     positions.flat().forEach(pos => drawCircle(ctx, pos.x, pos.y));
     positions.flat().filter(pos => pos.bad).forEach(pos => drawCircle(ctx, pos.x, pos.y, 'red'));
-    drawLines(canvas, ctx, size, range); // drawing before getCode may affect result
+    positions.forEach(r => r.reduce((p, c) => {
+        ctx.beginPath();
+        ctx.moveTo(p.x, p.y);
+        ctx.lineTo(c.x, c.y);
+        ctx.stroke();
+        return c;
+    }));
+    console.log('Bad modules: ' + positions.flat().filter(pos => pos.bad).length);
     const result = document.getElementById('result');
     drawCode(result, code);
     const resultFit = document.getElementById('fit');
