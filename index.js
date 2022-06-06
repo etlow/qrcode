@@ -1,6 +1,7 @@
 // Colors representing light and dark on the canvas for visualisation
 const LIGHT_VAL = 255;
 const DARK_VAL = 0;
+const THRESH = 120; // Threshold between light and dark
 // Helper function to get the index to access the canvas
 // There are 4 values red green blue alpha, this index points to the first
 function getIndex(imageData, x, y) {
@@ -10,12 +11,13 @@ function getIndex(imageData, x, y) {
 function threshold(data) {
     for (let i = 0; i < data.length; i += 4) { // For each pixel
         let val = LIGHT_VAL;
-        if (data[i] < 120 && data[i + 1] < 120 && data[i + 2] < 120) {
+        if (data[i] < THRESH && data[i + 1] < THRESH && data[i + 2] < THRESH) {
             val = DARK_VAL; // Threshold
         }
         data[i] = val; // Write to rgb values of imageData
         data[i + 1] = val;
         data[i + 2] = val;
+        data[i + 3] = 255;
     }
 }
 // Returns frequency count of each element in arr
@@ -298,86 +300,40 @@ function bestFitModule(imageData, size, oldX, oldY, expectedValue) {
 }
 // Get best fit module positions
 function getPositions(imageData, size) {
-    const width = (size.darkWidth + size.lightWidth) / 2;
-    const height = (size.darkHeight + size.lightHeight) / 2;
+    const overallWidth = (size.darkWidth + size.lightWidth) / 2;
+    const overallHeight = (size.darkHeight + size.lightHeight) / 2;
     const xFirst = getFirstCoord(imageData, size, true, false);
     const yFirst = getFirstCoord(imageData, size, false, false);
-    const firstSize = getModuleSize(imageData, xFirst, yFirst, xFirst + width * 7, yFirst + height * 7);
-    console.log(firstSize);
-    const firstWidth = (firstSize.darkWidth + firstSize.lightWidth) / 2;
-    const firstHeight = (firstSize.darkHeight + firstSize.lightHeight) / 2;
+    const SCAN_RADIUS = 7;
+    function getSize(x, y) {
+        const xStart = Math.max(0, xFirst - overallWidth, x - overallWidth * SCAN_RADIUS);
+        const yStart = Math.max(0, yFirst - overallHeight, y - overallHeight * SCAN_RADIUS);
+        const xEnd = Math.min(x + overallWidth * SCAN_RADIUS, imageData.width);
+        const yEnd = Math.min(y + overallHeight * SCAN_RADIUS, imageData.height);
+        const size = getModuleSize(imageData, xStart, yStart, xEnd, yEnd);
+        const width = (size.darkWidth + size.lightWidth) / 2;
+        const height = (size.darkHeight + size.lightHeight) / 2;
+        console.log(x, y, width, height);
+        return {width, height};
+    }
     const arr = [];
-    function calculateHeight(currPos, currHeight) {
-        const hasBound = currPos.bound.top || currPos.bound.bottom;
-        // If hasBound:
-        // Prevent rounding error if too close module is chosen
-        // Positions are snapped to integer values by fit algorithm
-        // Ignore last (3 - 1) rows of arr, first row accepted is 3 rows away
-        // If !hasBound:
-        // Should not correct for rounding error if position has been affected by module with bound earlier
-        // So, should take nearest module with bound
-        // No rows of arr ignored, first row accepted is 1 row away (closest row)
-        const exclude = hasBound ? 3 : 1;
-        if (arr.length < exclude) {
-            return currHeight;
-        }
-        let i = arr.length - exclude;
-        while (i > 0) {
-            const module = arr[i][0];
-            if (module.bound.top || module.bound.bottom) {
-                break;
-            }
-            i--;
-        }
-        const module = arr[i][0];
-        if (!hasBound) {
-            // Correct for rounding error
-            // Intended length from previous bound - current length
-            console.log(arr.length, i, 'nearest');
-            return module.height * (arr.length - i + 1) - (currPos.y - module.y);
-        }
-        console.log(arr.length, i, currPos.y - module.y, 'round');
-        return (currPos.y - module.y) / (arr.length - i);
-    }
-    function calculateWidth(currPos, currWidth, row) {
-        const hasBound = currPos.bound.left || currPos.bound.right;
-        const exclude = hasBound ? 3 : 1;
-        if (row.length < exclude) {
-            return currWidth;
-        }
-        let i = row.length - exclude;
-        while (i > 0) {
-            const module = row[i];
-            if (module.bound.left || module.bound.right) {
-                break;
-            }
-            i--;
-        }
-        const module = row[i];
-        if (!hasBound) {
-            //console.log(row.length, i, (currPos.x - module.x), (row.length - i));
-            return module.width * (row.length - i + 1) - (currPos.x - module.x);
-        }
-        return (currPos.x - module.x) / (row.length - i);
-    }
-    let x, y;
+    let x, y, height;
     do { // Each row
+        let width;
         const row = [];
         do { // Each column (single module)
-            let expectedValue, width, height;
+            let expectedValue;
             const topModule = arr[arr.length - 1]?.[row.length];
             const leftModule = row[row.length - 1];
             if (row.length == 0 && arr.length == 0) { // First column and first row
                 x = xFirst;
                 y = yFirst;
-                width = firstWidth;
-                height = firstHeight;
+                ({width, height} = getSize(x, y));
                 expectedValue = DARK_VAL;
             } else if (row.length == 0 && arr.length > 0) { // First column and not first row
                 x = topModule.x;
                 y = topModule.y + topModule.height;
-                width = topModule.width;
-                height = topModule.height;
+                ({width, height} = getSize(x, y));
             } else if (topModule?.bad == false) { // Not first column, top module exists and is not bad
                 x = (x + topModule.width + topModule.x) / 2;
                 y = (y + topModule.y + topModule.height) / 2;
@@ -389,14 +345,6 @@ function getPositions(imageData, size) {
                 height = leftModule.height;
             }
             const pos = bestFitModule(imageData, size, x, y, expectedValue);
-            if (arr.length == 0) {
-                width = calculateWidth(pos, width, row);
-                //console.log(width, x);
-            }
-            if (row.length == 0) {
-                height = calculateHeight(pos, height);
-                console.log(arr.length, height, y);
-            }
             pos.width = width;
             pos.height = height;
             row.push(pos);
