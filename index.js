@@ -88,9 +88,9 @@ function argmax(obj) {
     return maxI;
 }
 // Gets precise peak
-function averagePeak(obj) {
-    const radius = 2;
-    let maxI = parseInt(argmax(obj)); // Find peak
+function averagePeak(obj, maxI) {
+    maxI ??= parseInt(argmax(obj)); // Find peak if not given
+    const radius = Math.round(maxI / 5);
     let count = 0;
     let total = 0;
     // Average values weighted by frequency
@@ -102,14 +102,16 @@ function averagePeak(obj) {
     return total / count;
 }
 // Returns average width of modules from canvas
-function getModuleSize(imageData, xStart, yStart, xEnd, yEnd) {
+// May return NaN if there are no corresponding lengths
+// size: Given initial size to find a similar size
+function getModuleSize(imageData, xStart, yStart, xEnd, yEnd, size) {
     const lengths = getCrossoverLengths(imageData, xStart, yStart, xEnd, yEnd);
     console.log(lengths);
     return {
-        lightWidth: averagePeak(lengths.lightWidths),
-        darkWidth: averagePeak(lengths.darkWidths),
-        lightHeight: averagePeak(lengths.lightHeights),
-        darkHeight: averagePeak(lengths.darkHeights)
+        lightWidth: averagePeak(lengths.lightWidths, size?.lightWidth),
+        darkWidth: averagePeak(lengths.darkWidths, size?.darkWidth),
+        lightHeight: averagePeak(lengths.lightHeights, size?.lightHeight),
+        darkHeight: averagePeak(lengths.darkHeights, size?.darkHeight)
     };
 }
 // Finds first row/column of modules
