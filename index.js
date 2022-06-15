@@ -240,113 +240,151 @@ function bestFitModule(imageData, size, oldX, oldY, expectedValue) {
     let x = Math.round(oldX);
     let y = Math.round(oldY);
 
-    // r related to pixel count (similar to radius)
+    // r similar to radius
     // Divide by 2 for radius + a bit more, centre portion is more likely to be the module color
-    const r = Math.floor(Math.min(size.darkWidth, size.lightWidth) / 3); 
+    const r = Math.floor(Math.min(size.darkWidth, size.lightWidth) / 3);
     const val = expectedValue ?? argmax(countPixels(imageData, x - r, y - r, x + r, y + r));
+    const otherVal = val == DARK_VAL ? LIGHT_VAL : DARK_VAL;
     // radius width/height
-    const w = Math.round((val == DARK_VAL ? size.darkWidth : size.lightWidth) / 2);
-    const h = Math.round((val == DARK_VAL ? size.darkHeight : size.lightHeight) / 2);
-    const thresholdToMoveX = w; // Don't want to move just because a side has one more pixel than the other
-    const thresholdToMoveY = h;
+    const w = Math.round((val == DARK_VAL ? size.darkWidth : size.lightWidth) / 2 / 1.1);
+    const h = Math.round((val == DARK_VAL ? size.darkHeight : size.lightHeight) / 2 / 1.1);
 
-    // averageWidth related to move limit
-    const averageWidth = Math.round((size.darkWidth + size.lightWidth + size.darkHeight + size.lightHeight) / 4);
-    const moveLimit = Math.round(averageWidth / (expectedValue == null ? 2 : 1)); // Prevent moving too much
+    // Prevent moving too much
+    const limitMultiplier = expectedValue == null ? 0.5 : 1;
+    const xMoveLimit = Math.round((size.darkWidth + size.lightWidth) / 2 * limitMultiplier);
+    const yMoveLimit = Math.round((size.darkHeight + size.lightHeight) / 2 * limitMultiplier);
 
-    let xMove = 0, yMove = 0; // Move counter
-    let prevX, prevY; // Variable to check if actually moved
-    const bound = {left: false, right: false, top: false, bottom: false}; // Boundary found, position is probably reliable
-    do { // Move horizontally
-        prevX = x;
-        xMove++;
-        // A[xxxxxS] Try to move left
-        const leftAdd = countPixels(imageData, x - w - 1, y - h, x - w, y + h)[val] ?? 0;
-        const leftSub = countPixels(imageData, x + w - 1, y - h, x + w, y + h)[val] ?? 0;
-        if (leftAdd - leftSub > thresholdToMoveX) {
-            x--;
-        } else if (leftAdd - leftSub < -thresholdToMoveX) {
-            bound.left = true;
-        }
-        // [Sxxxxx]A Note x coord for lA + 1 = rS, lS + 1 = rA, no infinite loop
-        const rightAdd = countPixels(imageData, x + w, y - h, x + w + 1, y + h)[val] ?? 0;
-        const rightSub = countPixels(imageData, x - w, y - h, x - w + 1, y + h)[val] ?? 0;
-        if (rightAdd - rightSub > thresholdToMoveX) {
-            x++;
-        } else if (rightAdd - rightSub < -thresholdToMoveX) {
-            bound.right = true;
-        }
-    } while (prevX != x && xMove <= moveLimit);
-    do { // Move vertically
-        prevY = y;
-        yMove++;
-        const upAdd = countPixels(imageData, x - w, y - h - 1, x + w, y - h)[val] ?? 0;
-        const upSub = countPixels(imageData, x - w, y + h - 1, x + w, y + h)[val] ?? 0;
-        if (upAdd - upSub > thresholdToMoveY) {
-            y--;
-        } else if (upAdd - upSub < -thresholdToMoveY) {
-            bound.top = true;
-        }
-        const downAdd = countPixels(imageData, x - w, y + h, x + w, y + h + 1)[val] ?? 0;
-        const downSub = countPixels(imageData, x - w, y - h, x + w, y - h + 1)[val] ?? 0;
-        if (downAdd - downSub > thresholdToMoveY) {
-            y++;
-        } else if (downAdd - downSub < -thresholdToMoveY) {
-            bound.bottom = true;
-        }
-    } while (prevY != y && yMove <= moveLimit);
-    if (xMove > moveLimit || yMove > moveLimit) { // Move limit was reached
-        return {x: oldX, y: oldY, bound, bad: true}; // Assume bad alignment
-    }
-    return {x, y, bound, bad: false};
+    // Move horizontally
+    const leftWant = countPixels(imageData, x - w - xMoveLimit, y - h, x - w, y + h)[val] ?? 0;
+    const leftNot = countPixels(imageData, x - w, y - h, x, y + h)[otherVal] ?? 0; // E.g. left 1 col inside not wanted (other val)
+    const rightNot = countPixels(imageData, x, y - h, x + w, y + h)[otherVal] ?? 0;
+    const rightWant = countPixels(imageData, x + w, y - h, x + w + xMoveLimit, y + h)[val] ?? 0; // right 4 cols outside wanted
+    const xMove = Math.round((Math.min(rightWant, leftNot) - Math.min(leftWant, rightNot)) / h / 2); // Move min(1, 4) = 1 column
+    x += xMove;
+    // Move vertically
+    const topWant = countPixels(imageData, x - w, y - h - yMoveLimit, x + w, y - h)[val] ?? 0;
+    const topNot = countPixels(imageData, x - w, y - h, x + w, y)[otherVal] ?? 0;
+    const bottomNot = countPixels(imageData, x - w, y, x + w, y + h)[otherVal] ?? 0;
+    const bottomWant = countPixels(imageData, x - w, y + h, x + w, y + h + yMoveLimit)[val] ?? 0;
+    const yMove = Math.round((Math.min(bottomWant, topNot) - Math.min(topWant, bottomNot)) / w / 2);
+    y += yMove;
+    // Calculate move information
+    const bound = {left: false, right: false, top: topWant < w * 4, bottom: bottomWant < w * 4}; // Boundary found, position is probably reliable
+    const bad = Math.abs(xMove) >= xMoveLimit || Math.abs(yMove) >= yMoveLimit; // Move limit was reached
+    const smallMove = {horizontal: Math.abs(xMove) <= xMoveLimit / 2, vertical: Math.abs(yMove) <= yMoveLimit / 2};
+    return {x, y, bound, bad, smallMove};
 }
-// Get best fit module positions
-function getPositions(imageData, size) {
+// Find a fit of positions
+function fitPositions(imageData, size, base) {
     const overallWidth = (size.darkWidth + size.lightWidth) / 2;
     const overallHeight = (size.darkHeight + size.lightHeight) / 2;
     const xFirst = getFirstCoord(imageData, size, true, false);
     const yFirst = getFirstCoord(imageData, size, false, false);
-    const SCAN_RADIUS = 7;
-    function getSize(x, y) {
-        const xStart = Math.max(0, xFirst - overallWidth, x - overallWidth * SCAN_RADIUS);
-        const yStart = Math.max(0, yFirst - overallHeight, y - overallHeight * SCAN_RADIUS);
-        const xEnd = Math.min(x + overallWidth * SCAN_RADIUS, imageData.width);
-        const yEnd = Math.min(y + overallHeight * SCAN_RADIUS, imageData.height);
-        const size = getModuleSize(imageData, xStart, yStart, xEnd, yEnd);
-        const width = (size.darkWidth + size.lightWidth) / 2;
-        const height = (size.darkHeight + size.lightHeight) / 2;
-        console.log(x, y, width, height);
+    // Find width and height by looking at image with getModuleSize
+    function getModuleWidthHeight(xStart, yStart, xEnd, yEnd, peak) {
+        const size = getModuleSize(imageData, xStart, yStart, xEnd, yEnd, peak);
+        let width = (size.darkWidth + size.lightWidth) / 2;
+        let height = (size.darkHeight + size.lightHeight) / 2;
+        if (isNaN(width)) width = undefined;
+        if (isNaN(height)) height = undefined;
         return {width, height};
     }
+    const {width: firstWidth, height: firstHeight} = getModuleWidthHeight(xFirst, yFirst, xFirst + overallWidth * 9, yFirst + overallHeight * 9);
+    function iterateSquare(radius, f) {
+        for (let i = -radius; i <= radius; i++) {
+            for (let j = -radius; j <= radius; j++) {
+                f(i, j);
+            }
+        }
+    }
+    function average(arr) {
+        if (arr.length == 0) {
+            return;
+        }
+        return arr.reduce((a, c) => a + c) / arr.length;
+    }
+    // Find width by looking at previous fit
+    // x, y are array indices
+    function getWidth(x, y) {
+        const source = base ?? arr;
+        const widths = [];
+        const moduleGood = m => m?.bound.left || m?.bound.right;
+        iterateSquare(3, (i, j) => {
+            const baseModule = source?.[y + i]?.[x + j - 1];
+            const rightModule = source?.[y + i]?.[x + j];
+            if (moduleGood(baseModule) && moduleGood(rightModule)) {
+                widths.push(rightModule.x - baseModule.x);
+            }
+        });
+        return average(widths);
+    }
+    function getHeight(x, y) {
+        const source = base ?? arr;
+        const heights = [];
+        const moduleGood = m => m?.bound.top || m?.bound.bottom;
+        iterateSquare(3, (i, j) => {
+            const baseModule = source?.[y + i - 1]?.[x + j];
+            const bottomModule = source?.[y + i]?.[x + j];
+            if (moduleGood(baseModule) && moduleGood(bottomModule)) {
+                heights.push(bottomModule.y - baseModule.y);
+            }
+        });
+        return average(heights);
+    }
+    // Scale light and dark lengths according to single width/height
+    function scaledSize(width, height) {
+        return {
+            lightWidth: size.lightWidth / overallWidth * width,
+            darkWidth: size.darkWidth / overallWidth * width,
+            lightHeight: size.lightHeight / overallHeight * height,
+            darkHeight: size.darkHeight / overallHeight * height
+        };
+    }
     const arr = [];
-    let x, y, height;
+    let x, y, width, height;
     do { // Each row
-        let width;
         const row = [];
         do { // Each column (single module)
             let expectedValue;
             const topModule = arr[arr.length - 1]?.[row.length];
             const leftModule = row[row.length - 1];
+            width = getWidth(row.length, arr.length);
+            height = getHeight(row.length, arr.length);
+            //if (base && (width == undefined || height == undefined)) {
+            //    const baseModule = base[arr.length]?.[row.length];
+            //    if (baseModule) {
+            //        const module = topModule ?? leftModule ?? baseModule;
+            //        console.log(row.length, arr.length, module.height);
+            //        const moduleWidthHeight = getModuleWidthHeight(
+            //            baseModule.x - overallWidth * 5, baseModule.y - overallHeight * 5,
+            //            baseModule.x + overallWidth * 5, baseModule.y + overallHeight * 5,
+            //            scaledSize(module.width, module.height));
+            //        width ??= moduleWidthHeight.width;
+            //        height ??= moduleWidthHeight.height;
+            //    }
+            //}
             if (row.length == 0 && arr.length == 0) { // First column and first row
+                width ??= firstWidth;
+                height ??= firstHeight;
                 x = xFirst;
                 y = yFirst;
-                ({width, height} = getSize(x, y));
                 expectedValue = DARK_VAL;
             } else if (row.length == 0 && arr.length > 0) { // First column and not first row
+                width ??= topModule.width;
+                height ??= topModule.height;
                 x = topModule.x;
-                y = topModule.y + topModule.height;
-                ({width, height} = getSize(x, y));
+                y = topModule.y + height;
             } else if (topModule?.bad == false) { // Not first column, top module exists and is not bad
-                x = (x + topModule.width + topModule.x) / 2;
-                y = (y + topModule.y + topModule.height) / 2;
-                width = topModule.width;
-                height = topModule.height;
-            } else if (row.length > 0) { // Not first column, top module unavailable
-                x += leftModule.width;
-                width = leftModule.width;
-                height = leftModule.height;
+                width ??= topModule.width;
+                height ??= topModule.height;
+                x = (x + width + topModule.x) / 2;
+                y = (y + topModule.y + height) / 2;
+            } else { // Not first column, top module unavailable
+                width ??= leftModule.width;
+                height ??= leftModule.height;
+                x += width;
             }
-            const pos = bestFitModule(imageData, size, x, y, expectedValue);
+            const pos = bestFitModule(imageData, scaledSize(width, height), x, y, expectedValue);
             pos.width = width;
             pos.height = height;
             row.push(pos);
@@ -355,6 +393,11 @@ function getPositions(imageData, size) {
         arr.push(row);
     } while (y + height < imageData.height);
     return arr;
+}
+// Get best fit module positions
+function getPositions(imageData, size) {
+    const n = 3; // Run fitPositions n times
+    return [...Array(n + 1)].reduce(a => fitPositions(imageData, size, a));
 }
 // Takes in 2D array of positions, looks in canvas and returns 2D barcode
 function getCodeFit(imageData, size, arr) {
@@ -401,8 +444,12 @@ function main() {
     const positions = getPositions(imageData, size);
     const codeFit = getCodeFit(imageData, size, positions);
     //drawLines(canvas, ctx, size, range); // drawing before getCode may affect result
-    positions.flat().forEach(pos => drawCircle(ctx, pos.x, pos.y));
-    positions.flat().filter(pos => pos.bad).forEach(pos => drawCircle(ctx, pos.x, pos.y, 'red'));
+    positions.flat().forEach(pos => drawCircle(ctx, pos.x, pos.y,
+        pos.bad ? 'red' :
+        !pos.smallMove.vertical ? '#77FF00' :
+        pos.bound.top && pos.bound.bottom ? 'blue' :
+        pos.bound.top || pos.bound.bottom ? 'green' :
+        'yellow'));
     positions.forEach(r => r.reduce((p, c) => {
         ctx.beginPath();
         ctx.moveTo(p.x, p.y);
