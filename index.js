@@ -250,29 +250,32 @@ function bestFitModule(imageData, size, oldX, oldY, expectedValue) {
     const h = Math.round((val == DARK_VAL ? size.darkHeight : size.lightHeight) / 2 / 1.1);
 
     // Prevent moving too much
-    const limitMultiplier = expectedValue == null ? 0.5 : 1;
-    const xMoveLimit = Math.round((size.darkWidth + size.lightWidth) / 2 * limitMultiplier);
-    const yMoveLimit = Math.round((size.darkHeight + size.lightHeight) / 2 * limitMultiplier);
+    const xMoveLimit = Math.round((size.darkWidth + size.lightWidth) / 2 / 2);
+    const yMoveLimit = Math.round((size.darkHeight + size.lightHeight) / 2 / 2);
 
-    // Move horizontally
-    const leftWant = countPixels(imageData, x - w - xMoveLimit, y - h, x - w, y + h)[val] ?? 0;
-    const leftNot = countPixels(imageData, x - w, y - h, x, y + h)[otherVal] ?? 0; // E.g. left 1 col inside not wanted (other val)
-    const rightNot = countPixels(imageData, x, y - h, x + w, y + h)[otherVal] ?? 0;
-    const rightWant = countPixels(imageData, x + w, y - h, x + w + xMoveLimit, y + h)[val] ?? 0; // right 4 cols outside wanted
-    const xMove = Math.round((Math.min(rightWant, leftNot) - Math.min(leftWant, rightNot)) / h / 2); // Move min(1, 4) = 1 column
-    x += xMove;
-    // Move vertically
-    const topWant = countPixels(imageData, x - w, y - h - yMoveLimit, x + w, y - h)[val] ?? 0;
-    const topNot = countPixels(imageData, x - w, y - h, x + w, y)[otherVal] ?? 0;
-    const bottomNot = countPixels(imageData, x - w, y, x + w, y + h)[otherVal] ?? 0;
-    const bottomWant = countPixels(imageData, x - w, y + h, x + w, y + h + yMoveLimit)[val] ?? 0;
-    const yMove = Math.round((Math.min(bottomWant, topNot) - Math.min(topWant, bottomNot)) / w / 2);
-    y += yMove;
-    // Calculate move information
-    const bound = {left: false, right: false, top: topWant < w * 4, bottom: bottomWant < w * 4}; // Boundary found, position is probably reliable
-    const bad = Math.abs(xMove) >= xMoveLimit || Math.abs(yMove) >= yMoveLimit; // Move limit was reached
-    const smallMove = {horizontal: Math.abs(xMove) <= xMoveLimit / 2, vertical: Math.abs(yMove) <= yMoveLimit / 2};
-    return {x, y, bound, bad, smallMove};
+    function move() {
+        // Move horizontally
+        const leftWant = countPixels(imageData, x - w - xMoveLimit, y - h, x - w, y + h)[val] ?? 0;
+        const leftNot = countPixels(imageData, x - w, y - h, x, y + h)[otherVal] ?? 0; // E.g. left 1 col inside not wanted (other val)
+        const rightNot = countPixels(imageData, x, y - h, x + w, y + h)[otherVal] ?? 0;
+        const rightWant = countPixels(imageData, x + w, y - h, x + w + xMoveLimit, y + h)[val] ?? 0; // right 4 cols outside wanted
+        const xMove = Math.round((Math.min(rightWant, leftNot) - Math.min(leftWant, rightNot)) / h / 2); // Move min(1, 4) = 1 column
+        // Move vertically
+        const topWant = countPixels(imageData, x - w, y - h - yMoveLimit, x + w, y - h)[val] ?? 0;
+        const topNot = countPixels(imageData, x - w, y - h, x + w, y)[otherVal] ?? 0;
+        const bottomNot = countPixels(imageData, x - w, y, x + w, y + h)[otherVal] ?? 0;
+        const bottomWant = countPixels(imageData, x - w, y + h, x + w, y + h + yMoveLimit)[val] ?? 0;
+        const yMove = Math.round((Math.min(bottomWant, topNot) - Math.min(topWant, bottomNot)) / w / 2);
+        // Calculate move information
+        const bound = {left: false, right: false, top: topWant < w * 4, bottom: bottomWant < w * 4}; // Boundary found, position is probably reliable
+        const bad = Math.abs(xMove) >= xMoveLimit || Math.abs(yMove) >= yMoveLimit; // Move limit was reached
+        const smallMove = {horizontal: Math.abs(xMove) <= xMoveLimit / 2, vertical: Math.abs(yMove) <= yMoveLimit / 2};
+        return {x: x + xMove, y: y + yMove, bound, bad, smallMove};
+    }
+    if (expectedValue != undefined) {
+        ({x, y} = move()); // Move 2 times
+    }
+    return move();
 }
 // Find a fit of positions
 function fitPositions(imageData, size, base) {
