@@ -267,7 +267,7 @@ function bestFitModule(imageData, size, oldX, oldY, expectedValue) {
         const bottomWant = countPixels(imageData, x - w, y + h, x + w, y + h + yMoveLimit)[val] ?? 0;
         const yMove = Math.round((Math.min(bottomWant, topNot) - Math.min(topWant, bottomNot)) / w / 2);
         // Calculate move information
-        const bound = {left: false, right: false, top: topWant < w * 4, bottom: bottomWant < w * 4}; // Boundary found, position is probably reliable
+        const bound = {left: leftWant < h * 4, right: rightWant < h * 4, top: topWant < w * 4, bottom: bottomWant < w * 4}; // Boundary found, position is probably reliable
         const bad = Math.abs(xMove) >= xMoveLimit || Math.abs(yMove) >= yMoveLimit; // Move limit was reached
         const smallMove = {horizontal: Math.abs(xMove) <= xMoveLimit / 2, vertical: Math.abs(yMove) <= yMoveLimit / 2};
         return {x: x + xMove, y: y + yMove, bound, bad, smallMove};
