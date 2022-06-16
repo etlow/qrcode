@@ -319,6 +319,18 @@ function fitPositions(imageData, size, base) {
         }
         return arr.reduce((a, c) => a + c) / arr.length;
     }
+    function smallDifference(a, b, ratio = 0.2) {
+        return Math.abs(a - b) < Math.max(2, Math.abs(b) * ratio);
+    }
+    // Only output difference if b - a is close to c - b
+    function outputSimilarDiff(a, b, c, def) {
+        const diffA = b - a;
+        const diffB = c - b;
+        if (smallDifference(diffA, diffB)) {
+            return (diffA + diffB) / 2;
+        }
+        return def;
+    }
     // Find width by looking at previous fit
     // x, y are array indices
     function getWidth(x, y) {
@@ -356,57 +368,86 @@ function fitPositions(imageData, size, base) {
             darkHeight: size.darkHeight / overallHeight * height
         };
     }
+    // Even out y coordinates to the left
+    // To be called if bound found at current position
+    function leftPropagate(arr, xI, yI) {
+        if (!arr[yI - 1]?.[xI]) return; // Return if top does not exist
+        let height = arr[yI][xI].y - arr[yI - 1][xI].y; // Distance from current position to top position
+        if (!smallDifference(height, arr[yI][xI].height, 0.5)) return;
+        let leftX = xI - 1; // Find first x to the left to not be refit, want to refit modules without vertical bounds
+        while (leftX >= 0 && !arr[yI][leftX].bound.top && !arr[yI][leftX].bound.bottom) {
+            leftX--;
+        }
+        // All x in (leftX, xI) will be refit
+        for (let i = leftX + 1; i < xI; i++) {
+            if (leftX >= 0) {
+                // Proportional y for i between leftX and xI: (end y - start y) * index / total index + start y, minus y at top module to get height
+                height = (arr[yI][xI].y - arr[yI][leftX].y) * (i - leftX) / (xI - leftX) + arr[yI][leftX].y - arr[yI - 1][i].y;
+            }
+            arr[yI][i] = fit(arr, i, yI, undefined, height);
+        }
+    }
+    function fit(arr, xI, yI, width, height) {
+        let x, y, expectedValue;
+        const topModule = arr[yI - 1]?.[xI];
+        const leftModule = arr[yI][xI - 1];
+        const left2Module = arr[yI][xI - 2];
+        const left3Module = arr[yI][xI - 3];
+        const heightGiven = height != undefined;
+        width ??= getWidth(xI, yI);
+        height ??= getHeight(xI, yI);
+        if (xI == 0 && yI == 0) { // First column and first row
+            width ??= firstWidth;
+            height ??= firstHeight;
+            x = xFirst;
+            y = yFirst;
+            expectedValue = DARK_VAL;
+        } else if (xI == 0 && yI > 0) { // First column and not first row
+            width ??= topModule.width;
+            height ??= topModule.height;
+            x = topModule.x;
+            y = topModule.y + height;
+        } else if (topModule?.bad == false) { // Not first column, top module exists and is not bad
+            width ??= topModule.width;
+            height ??= topModule.height;
+            x = (leftModule.x + width + topModule.x) / 2;
+            if (heightGiven) {
+                y = topModule.y + height;
+            //} else if (leftModule.bound.top || leftModule.bound.bottom) {
+            //    const topLeftModule = arr[yI - 1][xI - 1];
+            //    y = topModule.y + leftModule.y - topLeftModule.y;
+            } else {
+                y = (leftModule.y + topModule.y + height) / 2;
+            }
+        //} else if (left2Module && left3Module) { // Not first column, top module unavailable, left left available
+        //    width ??= outputSimilarDiff(left3Module.x, left2Module.x, leftModule.x, leftModule.width);
+        //    height ??= leftModule.height;
+        //    x = leftModule.x + width;
+        //    y = leftModule.y + outputSimilarDiff(left3Module.y, left2Module.y, leftModule.y, 0);
+        } else { // Not first column, top module unavailable
+            width ??= leftModule.width;
+            height ??= leftModule.height;
+            x = leftModule.x + width;
+            y = leftModule.y;
+        }
+        const pos = bestFitModule(imageData, scaledSize(width, height), x, y, expectedValue);
+        pos.width = width;
+        pos.height = height;
+        return pos;
+    }
     const arr = [];
     let x, y, width, height;
     do { // Each row
         const row = [];
-        do { // Each column (single module)
-            let expectedValue;
-            const topModule = arr[arr.length - 1]?.[row.length];
-            const leftModule = row[row.length - 1];
-            width = getWidth(row.length, arr.length);
-            height = getHeight(row.length, arr.length);
-            //if (base && (width == undefined || height == undefined)) {
-            //    const baseModule = base[arr.length]?.[row.length];
-            //    if (baseModule) {
-            //        const module = topModule ?? leftModule ?? baseModule;
-            //        console.log(row.length, arr.length, module.height);
-            //        const moduleWidthHeight = getModuleWidthHeight(
-            //            baseModule.x - overallWidth * 5, baseModule.y - overallHeight * 5,
-            //            baseModule.x + overallWidth * 5, baseModule.y + overallHeight * 5,
-            //            scaledSize(module.width, module.height));
-            //        width ??= moduleWidthHeight.width;
-            //        height ??= moduleWidthHeight.height;
-            //    }
-            //}
-            if (row.length == 0 && arr.length == 0) { // First column and first row
-                width ??= firstWidth;
-                height ??= firstHeight;
-                x = xFirst;
-                y = yFirst;
-                expectedValue = DARK_VAL;
-            } else if (row.length == 0 && arr.length > 0) { // First column and not first row
-                width ??= topModule.width;
-                height ??= topModule.height;
-                x = topModule.x;
-                y = topModule.y + height;
-            } else if (topModule?.bad == false) { // Not first column, top module exists and is not bad
-                width ??= topModule.width;
-                height ??= topModule.height;
-                x = (x + width + topModule.x) / 2;
-                y = (y + topModule.y + height) / 2;
-            } else { // Not first column, top module unavailable
-                width ??= leftModule.width;
-                height ??= leftModule.height;
-                x += width;
-            }
-            const pos = bestFitModule(imageData, scaledSize(width, height), x, y, expectedValue);
-            pos.width = width;
-            pos.height = height;
-            row.push(pos);
-            ({x, y} = pos);
-        } while (x + width < imageData.width);
         arr.push(row);
+        do { // Each column (single module)
+            const pos = fit(arr, row.length, arr.length - 1);
+            row.push(pos);
+            ({x, y, width, height} = pos);
+            if (pos.bound.top || pos.bound.bottom) {
+                leftPropagate(arr, row.length - 1, arr.length - 1);
+            }
+        } while (x + width < imageData.width);
     } while (y + height < imageData.height);
     return arr;
 }
