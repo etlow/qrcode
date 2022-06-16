@@ -21,19 +21,18 @@ function threshold(data) {
     }
 }
 // Returns frequency count of each element in arr
-// Input: [1, 1, 1, 2, 4] Output: {1: 3, 2: 1, 4: 1} 
+// Input: [1, 1, 1, 2, 4] Output: {1: 3, 2: 1, 4: 1}
 function count(arr) {
     const count = {};
     arr.forEach(e => (count[e] = (count[e] ?? 0) + 1));
     return count;
 }
 // Helper function for getCrossoverLengths
-// Returns array of dark and light widths
+// Returns array of dark and light lengths of i coordinate
 function getWidths(getVal, iStart, jStart, iEnd, jEnd) {
     let light = [];
     let dark = [];
-    // Currently only horizontal scanlines, can add vertical (heights?)
-    for (let j = jStart; j < jEnd; j++) { // For each row
+    for (let j = jStart; j < jEnd; j++) { // Scan line for each row/column
         let prev = getVal(iStart, j);
         let pos = 0;
         for (let i = iStart + 1; i < iEnd; i++) { // Each pixel
@@ -131,7 +130,7 @@ function getFirstCoord(imageData, size, isX, isReversed) {
     }
     let getVal = getVal_1; // Could probably use closures to be able to reference getVal_1 later but this works
     if (isX) {
-        // Code below is interested in second coordinate
+        // Code below is interested in second coordinate e.g. if second coordinate in pair is y, it returns y coordinate of first module
         // If x coordinate is needed, need to swap them around
         getVal = (j, i) => getVal_1(i, j);
     }
@@ -306,6 +305,9 @@ function fitPositions(imageData, size, base) {
         return {width, height};
     }
     const {width: firstWidth, height: firstHeight} = getModuleWidthHeight(xFirst, yFirst, xFirst + overallWidth * 9, yFirst + overallHeight * 9);
+    function smallDifference(a, b, ratio = 0.2) {
+        return Math.abs(a - b) < Math.max(2, Math.abs(b) * ratio);
+    }
     function iterateSquare(radius, f) {
         for (let i = -radius; i <= radius; i++) {
             for (let j = -radius; j <= radius; j++) {
@@ -318,18 +320,6 @@ function fitPositions(imageData, size, base) {
             return;
         }
         return arr.reduce((a, c) => a + c) / arr.length;
-    }
-    function smallDifference(a, b, ratio = 0.2) {
-        return Math.abs(a - b) < Math.max(2, Math.abs(b) * ratio);
-    }
-    // Only output difference if b - a is close to c - b
-    function outputSimilarDiff(a, b, c, def) {
-        const diffA = b - a;
-        const diffB = c - b;
-        if (smallDifference(diffA, diffB)) {
-            return (diffA + diffB) / 2;
-        }
-        return def;
     }
     // Find width by looking at previous fit
     // x, y are array indices
@@ -391,8 +381,6 @@ function fitPositions(imageData, size, base) {
         let x, y, expectedValue;
         const topModule = arr[yI - 1]?.[xI];
         const leftModule = arr[yI][xI - 1];
-        const left2Module = arr[yI][xI - 2];
-        const left3Module = arr[yI][xI - 3];
         const heightGiven = height != undefined;
         width ??= getWidth(xI, yI);
         height ??= getHeight(xI, yI);
@@ -413,17 +401,9 @@ function fitPositions(imageData, size, base) {
             x = (leftModule.x + width + topModule.x) / 2;
             if (heightGiven) {
                 y = topModule.y + height;
-            //} else if (leftModule.bound.top || leftModule.bound.bottom) {
-            //    const topLeftModule = arr[yI - 1][xI - 1];
-            //    y = topModule.y + leftModule.y - topLeftModule.y;
             } else {
                 y = (leftModule.y + topModule.y + height) / 2;
             }
-        //} else if (left2Module && left3Module) { // Not first column, top module unavailable, left left available
-        //    width ??= outputSimilarDiff(left3Module.x, left2Module.x, leftModule.x, leftModule.width);
-        //    height ??= leftModule.height;
-        //    x = leftModule.x + width;
-        //    y = leftModule.y + outputSimilarDiff(left3Module.y, left2Module.y, leftModule.y, 0);
         } else { // Not first column, top module unavailable
             width ??= leftModule.width;
             height ??= leftModule.height;
@@ -435,6 +415,7 @@ function fitPositions(imageData, size, base) {
         pos.height = height;
         return pos;
     }
+    // Loop to find all modules
     const arr = [];
     let x, y, width, height;
     do { // Each row
