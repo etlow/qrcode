@@ -237,39 +237,52 @@ function getCode(imageData, size, range) {
 // Takes in coordinates and returns coordinates of best fit
 // expectedValue: forces finding a dark or light module
 function bestFitModule(imageData, size, oldX, oldY, expectedValue) {
+    // Ratios
+    const VAL_R = 0.7; // Radius of rectangle to determine value
+    const COUNT_R = 0.87; // Radius of counting rectangle
+    const PERP_R = 1; // Radius of counting rectangle perpendicular to moving direction, in addition to COUNT_R
+    const LIMIT = 0.5;
     let x = Math.round(oldX);
     let y = Math.round(oldY);
 
-    // r similar to radius
-    // Divide by 2 for radius + a bit more, centre portion is more likely to be the module color
-    const r = Math.floor(Math.min(size.darkWidth, size.lightWidth) / 3);
-    const val = expectedValue ?? argmax(countPixels(imageData, x - r, y - r, x + r, y + r));
+    // Divide by 2 for radius and a bit more, centre portion is more likely to be the module color
+    const vW = Math.floor(Math.min(size.darkWidth, size.lightWidth) / 2 * VAL_R);
+    const vH = Math.floor(Math.min(size.darkHeight, size.lightHeight) / 2 * VAL_R);
+    const val = expectedValue ?? argmax(countPixels(imageData, x - vW, y - vH, x + vW, y + vH));
     const otherVal = val == DARK_VAL ? LIGHT_VAL : DARK_VAL;
     // radius width/height
-    const w = Math.round((val == DARK_VAL ? size.darkWidth : size.lightWidth) / 2 / 1.1);
-    const h = Math.round((val == DARK_VAL ? size.darkHeight : size.lightHeight) / 2 / 1.1);
+    const calculateRadius = length => Math.max(1, Math.round(length / 2 * COUNT_R)); // Prevent divide by zero
+    const w = calculateRadius(val == DARK_VAL ? size.darkWidth : size.lightWidth);
+    const h = calculateRadius(val == DARK_VAL ? size.darkHeight : size.lightHeight);
 
     // Prevent moving too much
-    const xMoveLimit = Math.round((size.darkWidth + size.lightWidth) / 2 / 2);
-    const yMoveLimit = Math.round((size.darkHeight + size.lightHeight) / 2 / 2);
+    const xMoveLimit = Math.round((size.darkWidth + size.lightWidth) / 2 * LIMIT); // Divide by 2 for average
+    const yMoveLimit = Math.round((size.darkHeight + size.lightHeight) / 2 * LIMIT);
 
     function move() {
         // Move horizontally
-        const leftWant = countPixels(imageData, x - w - xMoveLimit, y - h, x - w, y + h)[val] ?? 0;
-        const leftNot = countPixels(imageData, x - w, y - h, x, y + h)[otherVal] ?? 0; // E.g. left 1 col inside not wanted (other val)
-        const rightNot = countPixels(imageData, x, y - h, x + w, y + h)[otherVal] ?? 0;
-        const rightWant = countPixels(imageData, x + w, y - h, x + w + xMoveLimit, y + h)[val] ?? 0; // right 4 cols outside wanted
-        const xMove = Math.round((Math.min(rightWant, leftNot) - Math.min(leftWant, rightNot)) / h / 2); // Move min(1, 4) = 1 column
+        const yS = Math.round(y - h * PERP_R);
+        const yE = Math.round(y + h * PERP_R);
+        const leftWant = countPixels(imageData, x - w * 2, yS, x - w, yE)[val] ?? 0;
+        const leftNot = countPixels(imageData, x - w, yS, x, yE)[otherVal] ?? 0; // E.g. left 1 col inside not wanted (other val)
+        const rightNot = countPixels(imageData, x, yS, x + w, yE)[otherVal] ?? 0;
+        const rightWant = countPixels(imageData, x + w, yS, x + w * 2, yE)[val] ?? 0; // right 4 cols outside wanted
+        const xMove = Math.round((Math.min(rightWant, leftNot) - Math.min(leftWant, rightNot)) / (yE - yS)); // Move min(1, 4) = 1 column
         // Move vertically
-        const topWant = countPixels(imageData, x - w, y - h - yMoveLimit, x + w, y - h)[val] ?? 0;
-        const topNot = countPixels(imageData, x - w, y - h, x + w, y)[otherVal] ?? 0;
-        const bottomNot = countPixels(imageData, x - w, y, x + w, y + h)[otherVal] ?? 0;
-        const bottomWant = countPixels(imageData, x - w, y + h, x + w, y + h + yMoveLimit)[val] ?? 0;
-        const yMove = Math.round((Math.min(bottomWant, topNot) - Math.min(topWant, bottomNot)) / w / 2);
+        const xS = Math.round(x - w * PERP_R);
+        const xE = Math.round(x + w * PERP_R);
+        const topWant = countPixels(imageData, xS, y - h * 2, xE, y - h)[val] ?? 0;
+        const topNot = countPixels(imageData, xS, y - h, xE, y)[otherVal] ?? 0;
+        const bottomNot = countPixels(imageData, xS, y, xE, y + h)[otherVal] ?? 0;
+        const bottomWant = countPixels(imageData, xS, y + h, xE, y + h * 2)[val] ?? 0;
+        const yMove = Math.round((Math.min(bottomWant, topNot) - Math.min(topWant, bottomNot)) / (xE - xS));
         // Calculate move information
         const bound = {left: leftWant < h * 4, right: rightWant < h * 4, top: topWant < w * 4, bottom: bottomWant < w * 4}; // Boundary found, position is probably reliable
         const bad = Math.abs(xMove) >= xMoveLimit || Math.abs(yMove) >= yMoveLimit; // Move limit was reached
         const smallMove = {horizontal: Math.abs(xMove) <= xMoveLimit / 2, vertical: Math.abs(yMove) <= yMoveLimit / 2};
+        if (bad && expectedValue == undefined) {
+            return {x, y, bound, bad, smallMove};
+        }
         return {x: x + xMove, y: y + yMove, bound, bad, smallMove};
     }
     if (expectedValue != undefined) {
