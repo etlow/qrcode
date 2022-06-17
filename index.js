@@ -501,6 +501,19 @@ function main() {
     const resultFit = document.getElementById('fit');
     drawCode(fit, codeFit);
 }
+
+const imageInput = document.getElementById('imageInput');
+imageInput.onchange = function () {
+    if (this.files.length == 0) {
+        return;
+    }
+    img.src = URL.createObjectURL(this.files[0]);
+    img.onload = function () {
+        URL.revokeObjectURL(img.src);
+        main();
+    }
+}
+
 if (img.complete) {
     main()
 } else {
