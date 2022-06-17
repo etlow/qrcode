@@ -308,42 +308,27 @@ function fitPositions(imageData, size, base) {
     function smallDifference(a, b, ratio = 0.2) {
         return Math.abs(a - b) < Math.max(2, Math.abs(b) * ratio);
     }
-    function iterateSquare(radius, f) {
-        for (let i = -radius; i <= radius; i++) {
-            for (let j = -radius; j <= radius; j++) {
-                f(i, j);
-            }
-        }
-    }
     function average(arr) {
         if (arr.length == 0) {
             return;
         }
         return arr.reduce((a, c) => a + c) / arr.length;
     }
-    // Find width by looking at previous fit
+    // Find width/height by looking at previous ?? current fit
     // x, y are array indices
-    function getWidth(x, y) {
+    // dimension is 'width' or 'height'
+    function getLengths(x, y, dimension, radius = 3) {
         const source = base ?? arr;
-        const widths = [];
-        iterateSquare(3, (i, j) => {
-            const module = source?.[y + i]?.[x + j];
-            if (module) {
-                widths.push(module.width);
+        const lengths = [];
+        for (let i = -radius; i <= radius; i++) {
+            for (let j = -radius; j <= radius; j++) {
+                const module = source?.[y + i]?.[x + j];
+                if (module) {
+                    lengths.push(module[dimension]);
+                }
             }
-        });
-        return average(widths);
-    }
-    function getHeight(x, y) {
-        const source = base ?? arr;
-        const heights = [];
-        iterateSquare(3, (i, j) => {
-            const module = source?.[y + i]?.[x + j];
-            if (module) {
-                heights.push(module.height);
-            }
-        });
-        return average(heights);
+        }
+        return average(lengths);
     }
     // Scale light and dark lengths according to single width/height
     function scaledSize(width, height) {
@@ -378,8 +363,8 @@ function fitPositions(imageData, size, base) {
         const topModule = arr[yI - 1]?.[xI];
         const leftModule = arr[yI][xI - 1];
         const heightGiven = height != undefined;
-        width ??= getWidth(xI, yI);
-        height ??= getHeight(xI, yI);
+        width ??= getLengths(xI, yI, 'width');
+        height ??= getLengths(xI, yI, 'height');
         if (xI == 0 && yI == 0) { // First column and first row
             width ??= firstWidth;
             height ??= firstHeight;
