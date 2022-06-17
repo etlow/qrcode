@@ -326,12 +326,10 @@ function fitPositions(imageData, size, base) {
     function getWidth(x, y) {
         const source = base ?? arr;
         const widths = [];
-        const moduleGood = m => m?.bound.left || m?.bound.right;
         iterateSquare(3, (i, j) => {
-            const baseModule = source?.[y + i]?.[x + j - 1];
-            const rightModule = source?.[y + i]?.[x + j];
-            if (moduleGood(baseModule) && moduleGood(rightModule)) {
-                widths.push(rightModule.x - baseModule.x);
+            const module = source?.[y + i]?.[x + j];
+            if (module) {
+                widths.push(module.width);
             }
         });
         return average(widths);
@@ -339,12 +337,10 @@ function fitPositions(imageData, size, base) {
     function getHeight(x, y) {
         const source = base ?? arr;
         const heights = [];
-        const moduleGood = m => m?.bound.top || m?.bound.bottom;
         iterateSquare(3, (i, j) => {
-            const baseModule = source?.[y + i - 1]?.[x + j];
-            const bottomModule = source?.[y + i]?.[x + j];
-            if (moduleGood(baseModule) && moduleGood(bottomModule)) {
-                heights.push(bottomModule.y - baseModule.y);
+            const module = source?.[y + i]?.[x + j];
+            if (module) {
+                heights.push(module.height);
             }
         });
         return average(heights);
@@ -413,6 +409,15 @@ function fitPositions(imageData, size, base) {
         const pos = bestFitModule(imageData, scaledSize(width, height), x, y, expectedValue);
         pos.width = width;
         pos.height = height;
+        // Update width and height properties
+        const horizontalBound = m => m?.bound.left || m?.bound.right;
+        const verticalBound = m => m?.bound.top || m?.bound.bottom;
+        if (horizontalBound(pos) && horizontalBound(leftModule) && smallDifference(width, pos.x - leftModule.x, 0.3)) {
+            pos.width = pos.x - leftModule.x;
+        }
+        if (verticalBound(pos) && verticalBound(topModule) && smallDifference(height, pos.y - topModule.y, 0.3)) {
+            pos.height = pos.y - topModule.y;
+        }
         return pos;
     }
     // Loop to find all modules
