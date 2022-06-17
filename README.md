@@ -1,6 +1,12 @@
 # QR code extractor
 
-Currently only extracts a single barcode from an image without other dark components. The barcode should not be rotated or tilted. The code is extracted as a 2D array and redrawn on a second canvas for verification purposes.
+This program currently only extracts a single barcode from an image without other dark components. The barcode should not be rotated or tilted. The code is extracted as a 2D array and redrawn on a second canvas for verification purposes.
+
+It also accepts slightly bent or distorted codes.
+
+## What it is not
+
+It does not scan and decode QR codes. It merely extracts and displays a 2D barcode, similar to a preprocessing step.
 
 ## Running the code
 
@@ -12,16 +18,17 @@ The script may not work when run from local files due to cross-origin issues.
 
 The intention for writing this program was to automatically join torn QR codes. It is something I have been thinking of doing but never got around to doing it.
 
-The job of a normal QR code with respect to computer vision is much easier as it just has to look for the three big squares which can be easily found with scanlines no matter which way the QR code is rotated. The position of these three squares yields the orientation and size (version) of these QR codes. A naïve barcode reader does not even need to utilise the timing patterns assuming the QR code is flat.
+The job of scanning a normal QR code with respect to computer vision is much easier as it just has to look for the three big squares which can be easily found with scanlines no matter which way the QR code is rotated. The position of these three squares yields the orientation and size (version) of these QR codes. A naïve barcode reader does not even need to utilise the timing patterns assuming the QR code is flat.
 
 If the QR code is torn, these squares may not even exist in parts of the code. The problem becomes finding and extracting a 2D barcode and the outlines. The outlines are used to figure out how the codes are supposed to be joined together.
+
+I then pivoted to extracting bent QR codes as these are commonly seen if the QR code is printed on a receipt. This took up the bulk of the time.
 
 ## Assumptions and future work
 
 The problem that I set out to solve was to extract the 2D barcode coloured with any 2 colours oriented in any way. As I wanted to get working code out as fast as possible, I made many simplifications.
-- Assume black and white barcodes, coloured bar codes are probably for decorative purposes anyway and not contain important data, some preprocessing can be done to convert to black and white
-- Assume the code is flat and the paper is not bent. The timing patterns might not be needed now and it becomes a projective transformation problem.
-- Further assume the code is facing the camera directly and is not rotated. Then all the bits (modules) of the code are arranged horizontally and vertically, vastly simplifying the problem.
+- Assume black and white barcodes, coloured bar codes are probably for decorative purposes anyway and not contain important data, some preprocessing can be done to convert the image to black and white.
+- Assume the code is not rotated. Then all the bits (modules) of the code are arranged roughly horizontally and vertically, simplifying the problem.
 - Assume that the barcode is the only dark object in the scene.
 
 I intend to work on some of the points above in the future. The part about actually joining torn QR codes is not mentioned above and I intend to work on this next. After the whole pipeline is completed, I plan to link it to the device camera.
@@ -43,6 +50,8 @@ All the work is done in the `main()` function. First the image is `threshold`ed 
 The output of the frequency counting of dark and light transitions is visualised below. The first peak corresponds to one module width, the second peak corresponds to runs of two modules and so on.
 
 ![Plot of dark and light transitions and their number of occurrences](Figure_1.png)
+
+For the fit algorithm which can adapt to modules of different sizes, `getPositions` returns a 2D array of module positions and other information about the modules, and `getCodeFit` uses this to extract the 2D barcode array.
 
 ## Algorithm alternatives
 
