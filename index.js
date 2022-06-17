@@ -278,11 +278,10 @@ function bestFitModule(imageData, size, oldX, oldY, expectedValue) {
         // Calculate move information
         const bound = {left: leftWant < h * 4, right: rightWant < h * 4, top: topWant < w * 4, bottom: bottomWant < w * 4}; // Boundary found, position is probably reliable
         const bad = Math.abs(xMove) >= xMoveLimit || Math.abs(yMove) >= yMoveLimit; // Move limit was reached
-        const smallMove = {horizontal: Math.abs(xMove) <= xMoveLimit / 2, vertical: Math.abs(yMove) <= yMoveLimit / 2};
         if (bad && expectedValue == undefined) {
-            return {x, y, bound, bad, smallMove};
+            return {x, y, bound, bad};
         }
-        return {x: x + xMove, y: y + yMove, bound, bad, smallMove};
+        return {x: x + xMove, y: y + yMove, bound, bad};
     }
     if (expectedValue != undefined) {
         ({x, y} = move()); // Move 2 times
@@ -474,11 +473,11 @@ function main() {
     //drawLines(canvas, ctx, size, range); // drawing before getCode may affect result
     positions.flat().forEach(pos => drawCircle(ctx, pos.x, pos.y,
         pos.bad ? 'red' :
-        !pos.smallMove.vertical ? '#77FF00' :
-        pos.bound.top && pos.bound.bottom ? 'blue' :
         pos.bound.top || pos.bound.bottom ? 'green' :
+        pos.bound.left || pos.bound.right ? 'blue' :
         'yellow'));
     positions.forEach(r => r.reduce((p, c) => {
+        ctx.strokeStyle = 'grey';
         ctx.beginPath();
         ctx.moveTo(p.x, p.y);
         ctx.lineTo(c.x, c.y);
