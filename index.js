@@ -197,6 +197,26 @@ function drawLines(canv, ctx, size, range) {
         ctx.stroke();
     }
 }
+
+// New fit method specific functions
+
+// Draw circles and lines to visualise fit positions
+function drawFit(ctx, positions) {
+    positions.flat().forEach(pos => drawCircle(ctx, pos.x, pos.y,
+        pos.bad ? 'red' :
+        pos.bound.top || pos.bound.bottom ? 'green' :
+        pos.bound.left || pos.bound.right ? 'blue' :
+        'yellow'));
+    positions.forEach(r => r.reduce((p, c) => {
+        ctx.strokeStyle = 'grey';
+        ctx.beginPath();
+        ctx.moveTo(p.x, p.y);
+        ctx.lineTo(c.x, c.y);
+        ctx.stroke();
+        return c;
+    }));
+}
+
 // Counts pixel values in range
 function countPixels(imageData, xStart, yStart, xEnd, yEnd) {
     const obj = {};
@@ -466,24 +486,15 @@ function main() {
     threshold(imageData.data);
     ctx.putImageData(imageData, 0, 0);
     const size = getModuleSize(imageData);
+    // Simple grid
     const range = getRange(imageData, size);
     const code = getCode(imageData, size, range);
+    // Fit
     const positions = getPositions(imageData, size);
     const codeFit = getCodeFit(imageData, size, positions);
-    //drawLines(canvas, ctx, size, range); // drawing before getCode may affect result
-    positions.flat().forEach(pos => drawCircle(ctx, pos.x, pos.y,
-        pos.bad ? 'red' :
-        pos.bound.top || pos.bound.bottom ? 'green' :
-        pos.bound.left || pos.bound.right ? 'blue' :
-        'yellow'));
-    positions.forEach(r => r.reduce((p, c) => {
-        ctx.strokeStyle = 'grey';
-        ctx.beginPath();
-        ctx.moveTo(p.x, p.y);
-        ctx.lineTo(c.x, c.y);
-        ctx.stroke();
-        return c;
-    }));
+    // Drawing on ctx before getCode may affect result, all drawing below this comment
+    //drawLines(canvas, ctx, size, range);
+    drawFit(ctx, positions);
     console.log('Bad modules: ' + positions.flat().filter(pos => pos.bad).length);
     const result = document.getElementById('result');
     drawCode(result, code);
